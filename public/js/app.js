@@ -1,17 +1,20 @@
 document.addEventListener('DOMContentLoaded', () => {
   const socket = io();
 
+  // OTP State
+  let generatedOtp = null;
+
   // Application State
   const state = {
     user: null,
     currentRoom: 'general',
-    activeDM: null, // socketId if in DM mode
+    activeDmEmail: null,
     soundEnabled: true,
     typingTimer: null,
-    pendingAttachment: null // { type: 'image'|'audio', dataUrl }
+    pendingAttachment: null
   };
 
-  // Web Audio Synthesizer (Instant Sound FX without audio asset files)
+  // Web Audio Synthesizer Sound FX
   const soundFX = {
     playSend() {
       if (!state.soundEnabled) return;
@@ -51,14 +54,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // DOM Elements
   const loginModal = document.getElementById('login-modal');
-  const loginForm = document.getElementById('login-form');
-  const mainLayout = document.getElementById('main-layout');
+  const loginStep1 = document.getElementById('login-step-1');
+  const loginStep2 = document.getElementById('login-step-2');
   const usernameInput = document.getElementById('username-input');
+  const emailInput = document.getElementById('email-input');
   const avatarPicker = document.getElementById('avatar-picker');
   const statusSelect = document.getElementById('status-select');
+  const verifyEmailDisplay = document.getElementById('verify-email-display');
+  const demoCodeVal = document.getElementById('demo-code-val');
+  const otpInput = document.getElementById('otp-input');
+  const otpError = document.getElementById('otp-error');
+  const backToStep1 = document.getElementById('back-to-step1');
+
+  const mainLayout = document.getElementById('main-layout');
+  const sidebar = document.getElementById('sidebar');
+  const sidebarOverlay = document.getElementById('sidebar-overlay');
+  const sidebarToggle = document.getElementById('sidebar-toggle');
+  const closeSidebarBtn = document.getElementById('close-sidebar-btn');
 
   const currentUserAvatar = document.getElementById('current-user-avatar');
   const currentUserName = document.getElementById('current-user-name');
+  const currentUserEmail = document.getElementById('current-user-email');
   const currentUserStatus = document.getElementById('current-user-status');
   
   const roomsList = document.getElementById('rooms-list');
@@ -66,6 +82,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const userCount = document.getElementById('user-count');
   const addRoomBtn = document.getElementById('add-room-btn');
   const currentRoomTitle = document.getElementById('current-room-title');
+  const roomSubtitle = document.getElementById('room-subtitle');
+  const headerIcon = document.getElementById('header-icon');
+  const chatTypeBadge = document.getElementById('chat-type-badge');
   
   const messagesFeed = document.getElementById('messages-feed');
   const messagesContainer = document.getElementById('messages-container');
@@ -82,6 +101,21 @@ document.addEventListener('DOMContentLoaded', () => {
   const removeAttachment = document.getElementById('remove-attachment');
   const soundToggle = document.getElementById('sound-toggle');
 
+  // Mobile Drawer Toggle Listeners
+  function openSidebar() {
+    sidebar.classList.add('open');
+    sidebarOverlay.classList.add('active');
+  }
+
+  function closeSidebar() {
+    sidebar.classList.remove('open');
+    sidebarOverlay.classList.remove('active');
+  }
+
+  if (sidebarToggle) sidebarToggle.addEventListener('click', openSidebar);
+  if (closeSidebarBtn) closeSidebarBtn.addEventListener('click', closeSidebar);
+  if (sidebarOverlay) sidebarOverlay.addEventListener('click', closeSidebar);
+
   // Avatar Selection Listener
   avatarPicker.addEventListener('click', (e) => {
     const opt = e.target.closest('.avatar-opt');
@@ -90,28 +124,60 @@ document.addEventListener('DOMContentLoaded', () => {
     opt.classList.add('selected');
   });
 
-  // Handle Login Form Submit
-  loginForm.addEventListener('submit', (e) => {
+  // Step 1 Submit: Send Verification Code
+  loginStep1.addEventListener('submit', (e) => {
     e.preventDefault();
     const username = usernameInput.value.trim();
+    const email = emailInput.value.trim().toLowerCase();
+
+    if (!username || !email) return;
+
+    // Generate random 4-digit OTP code
+    generatedOtp = Math.floor(1000 + Math.random() * 9000).toString();
+    verifyEmailDisplay.textContent = email;
+    demoCodeVal.textContent = generatedOtp;
+
+    loginStep1.classList.add('hidden');
+    loginStep2.classList.remove('hidden');
+    otpInput.focus();
+  });
+
+  backToStep1.addEventListener('click', () => {
+    loginStep2.classList.add('hidden');
+    loginStep1.classList.remove('hidden');
+  });
+
+  // Step 2 Submit: Verify Code & Enter Workspace
+  loginStep2.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const enteredCode = otpInput.value.trim();
+
+    if (enteredCode !== generatedOtp) {
+      otpError.classList.remove('hidden');
+      return;
+    }
+
+    otpError.classList.add('hidden');
+
+    const username = usernameInput.value.trim();
+    const email = emailInput.value.trim().toLowerCase();
     const avatar = document.querySelector('.avatar-opt.selected')?.dataset.avatar || '⚡';
     const status = statusSelect.value;
 
-    if (!username) return;
+    state.user = { username, email, avatar, status };
 
-    state.user = { username, avatar, status };
-    
-    // UI Update
+    // Update UI Profile Card
     currentUserAvatar.textContent = avatar;
     currentUserName.textContent = username;
+    currentUserEmail.textContent = email;
     currentUserStatus.className = `status-dot ${status}`;
 
     loginModal.classList.remove('active');
     loginModal.classList.add('hidden');
     mainLayout.classList.remove('hidden');
 
-    // Emit socket login event
-    socket.emit('user_join', { username, avatar, status });
+    // Socket Join with Email & Verified Status
+    socket.emit('user_join', { username, email, avatar, status });
   });
 
   // Socket Init Data Handler
@@ -122,58 +188,97 @@ document.addEventListener('DOMContentLoaded', () => {
     renderHistory(history);
   });
 
-  // Render Rooms
+  // Render Public Channels List
   function renderRooms(rooms) {
     roomsList.innerHTML = '';
     rooms.forEach((room) => {
       const li = document.createElement('li');
-      li.className = `nav-item ${room === state.currentRoom && !state.activeDM ? 'active' : ''}`;
+      li.className = `nav-item ${room === state.currentRoom && !state.activeDmEmail ? 'active' : ''}`;
       li.innerHTML = `<span>#</span> <span>${room}</span>`;
-      li.addEventListener('click', () => switchRoom(room));
+      li.addEventListener('click', () => {
+        switchRoom(room);
+        closeSidebar();
+      });
       roomsList.appendChild(li);
     });
   }
 
-  // Render Online Users
+  // Render Online Verified Users for DM
   function renderUsers(users) {
     usersList.innerHTML = '';
-    const otherUsers = users.filter(u => u.id !== socket.id);
+    const otherUsers = users.filter(u => u.email !== state.user?.email);
     userCount.textContent = otherUsers.length;
+
+    if (otherUsers.length === 0) {
+      const emptyLi = document.createElement('li');
+      emptyLi.className = 'nav-item';
+      emptyLi.style.fontSize = '11px';
+      emptyLi.style.opacity = '0.6';
+      emptyLi.textContent = 'No other users online';
+      usersList.appendChild(emptyLi);
+      return;
+    }
 
     otherUsers.forEach((u) => {
       const li = document.createElement('li');
-      li.className = `nav-item ${state.activeDM === u.id ? 'active' : ''}`;
+      li.className = `nav-item ${state.activeDmEmail === u.email ? 'active' : ''}`;
       li.innerHTML = `
         <span>${u.avatar}</span>
-        <span style="flex:1">${u.username}</span>
+        <div style="flex:1; overflow:hidden;">
+          <div style="font-size:13px; font-weight:600; text-overflow:ellipsis; overflow:hidden;">${escapeHtml(u.username)}</div>
+          <span class="dm-email-tag">${escapeHtml(u.email)}</span>
+        </div>
         <span class="status-dot ${u.status}"></span>
       `;
-      li.addEventListener('click', () => startDM(u));
+      li.addEventListener('click', () => {
+        startDM(u);
+        closeSidebar();
+      });
       usersList.appendChild(li);
     });
   }
 
-  // Switch Public Channel
+  // Switch to Public Channel
   function switchRoom(room) {
     state.currentRoom = room;
-    state.activeDM = null;
-    currentRoomTitle.textContent = room;
-    socket.emit('switch_room', room);
+    state.activeDmEmail = null;
 
+    headerIcon.textContent = '#';
+    currentRoomTitle.textContent = room;
+    roomSubtitle.textContent = 'Public group channel';
+    chatTypeBadge.className = 'chat-type-badge public-badge';
+    chatTypeBadge.textContent = '📢 Public Group';
+    messageInput.placeholder = `Message #${room}...`;
+
+    socket.emit('switch_room', room);
     document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
     renderRooms(Array.from(document.querySelectorAll('#rooms-list li span:nth-child(2)')).map(el => el.textContent));
+    if (state.user) socket.emit('users_update');
   }
 
-  // Start Direct Message
+  // Switch to Private Direct Message Session
   function startDM(targetUser) {
-    state.activeDM = targetUser.id;
+    state.activeDmEmail = targetUser.email;
+    
+    headerIcon.textContent = '🔒';
     currentRoomTitle.textContent = `@${targetUser.username}`;
-    messagesFeed.innerHTML = `<div class="sys-msg">Direct message session started with @${targetUser.username}</div>`;
+    roomSubtitle.textContent = `Private 1-on-1 session (${targetUser.email})`;
+    chatTypeBadge.className = 'chat-type-badge dm-badge';
+    chatTypeBadge.textContent = '🔒 Private 1-on-1';
+    messageInput.placeholder = `Private message to @${targetUser.username}...`;
+
+    document.querySelectorAll('#users-list .nav-item').forEach(el => el.classList.remove('active'));
+
+    socket.emit('open_dm', { targetEmail: targetUser.email });
   }
 
-  // Create New Channel Button
+  socket.on('dm_opened', ({ recipientUser, history }) => {
+    renderHistory(history);
+  });
+
+  // Create Channel Button Listener
   addRoomBtn.addEventListener('click', () => {
-    const name = prompt('Enter new channel name:');
+    const name = prompt('Enter new public channel name:');
     if (name) {
       socket.emit('create_room', name);
     }
@@ -183,41 +288,56 @@ document.addEventListener('DOMContentLoaded', () => {
     renderRooms(rooms);
   });
 
-  socket.on('room_switched', ({ room, history }) => {
+  socket.on('room_switched', ({ history }) => {
     renderHistory(history);
   });
 
-  // Render Message History
+  // Render Chat Message History
   function renderHistory(history) {
     messagesFeed.innerHTML = '';
-    history.forEach(appendMessage);
+    if (history.length === 0) {
+      const sys = document.createElement('div');
+      sys.className = 'sys-msg';
+      sys.textContent = state.activeDmEmail 
+        ? `🔒 Private chat session started. Messages are end-to-end isolated.`
+        : `📢 Joined #${state.currentRoom}. Send a message to get started!`;
+      messagesFeed.appendChild(sys);
+    } else {
+      history.forEach(appendMessage);
+    }
     scrollToBottom();
   }
 
   // Handle Incoming Messages
   socket.on('receive_message', (msg) => {
-    appendMessage(msg);
-    scrollToBottom();
-    if (msg.senderId !== socket.id) soundFX.playReceive();
+    if (!state.activeDmEmail && msg.targetRoom === state.currentRoom) {
+      appendMessage(msg);
+      scrollToBottom();
+      if (msg.senderEmail !== state.user?.email) soundFX.playReceive();
+    }
   });
 
   socket.on('receive_direct_message', (msg) => {
-    appendMessage(msg);
-    scrollToBottom();
-    if (msg.senderId !== socket.id) soundFX.playReceive();
+    if (state.activeDmEmail && (msg.senderEmail === state.activeDmEmail || msg.recipientEmail === state.activeDmEmail)) {
+      appendMessage(msg);
+      scrollToBottom();
+      if (msg.senderEmail !== state.user?.email) soundFX.playReceive();
+    }
   });
 
   socket.on('system_message', (msg) => {
-    const div = document.createElement('div');
-    div.className = 'sys-msg';
-    div.textContent = `[${msg.timestamp}] ${msg.text}`;
-    messagesFeed.appendChild(div);
-    scrollToBottom();
+    if (!state.activeDmEmail) {
+      const div = document.createElement('div');
+      div.className = 'sys-msg';
+      div.textContent = `[${msg.timestamp}] ${msg.text}`;
+      messagesFeed.appendChild(div);
+      scrollToBottom();
+    }
   });
 
   // Append Single Message to Feed
   function appendMessage(msg) {
-    const isMe = msg.senderId === socket.id;
+    const isMe = msg.senderEmail === state.user?.email;
     const row = document.createElement('div');
     row.className = `msg-row ${isMe ? 'me' : ''}`;
     row.id = msg.id;
@@ -235,11 +355,10 @@ document.addEventListener('DOMContentLoaded', () => {
       <span class="msg-avatar">${msg.avatar}</span>
       <div class="msg-body">
         <div class="msg-header">
-          <span class="msg-sender">${msg.sender}</span>
+          <span class="msg-sender">${escapeHtml(msg.sender)}</span>
           <span class="msg-time">${msg.timestamp}</span>
         </div>
         <div class="msg-bubble">${contentHtml}</div>
-        <div class="reactions-list" id="reactions-${msg.id}"></div>
       </div>
     `;
 
@@ -256,21 +375,20 @@ document.addEventListener('DOMContentLoaded', () => {
       text,
       type: state.pendingAttachment ? state.pendingAttachment.type : 'text',
       attachmentUrl: state.pendingAttachment ? state.pendingAttachment.dataUrl : null,
-      isDirect: !!state.activeDM,
-      recipientId: state.activeDM,
+      isDirect: !!state.activeDmEmail,
+      recipientEmail: state.activeDmEmail,
       targetRoom: state.currentRoom
     };
 
     socket.emit('send_message', payload);
     soundFX.playSend();
 
-    // Reset Input & Attachments
     messageInput.value = '';
     clearAttachment();
-    socket.emit('typing_stop');
+    socket.emit('typing_stop', { isDirect: !!state.activeDmEmail, recipientEmail: state.activeDmEmail, room: state.currentRoom });
   });
 
-  // Image Attachment Upload Listener
+  // Image Attachment Upload
   imageInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -284,7 +402,7 @@ document.addEventListener('DOMContentLoaded', () => {
     reader.readAsDataURL(file);
   });
 
-  // Voice Recording Logic (MediaRecorder API)
+  // Voice Note Recording
   let mediaRecorder = null;
   let audioChunks = [];
   let isRecording = false;
@@ -312,7 +430,6 @@ document.addEventListener('DOMContentLoaded', () => {
         mediaRecorder.start();
         isRecording = true;
         voiceRecordBtn.style.color = '#ef4444';
-        voiceRecordBtn.title = 'Click again to Stop Recording';
       } catch (err) {
         alert('Microphone access denied or not supported.');
       }
@@ -320,7 +437,6 @@ document.addEventListener('DOMContentLoaded', () => {
       mediaRecorder.stop();
       isRecording = false;
       voiceRecordBtn.style.color = '';
-      voiceRecordBtn.title = 'Hold/Click to Record Voice Note';
     }
   });
 
@@ -334,20 +450,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Live Typing Indicators
   messageInput.addEventListener('input', () => {
-    socket.emit('typing_start');
+    socket.emit('typing_start', { isDirect: !!state.activeDmEmail, recipientEmail: state.activeDmEmail, room: state.currentRoom });
     clearTimeout(state.typingTimer);
     state.typingTimer = setTimeout(() => {
-      socket.emit('typing_stop');
+      socket.emit('typing_stop', { isDirect: !!state.activeDmEmail, recipientEmail: state.activeDmEmail, room: state.currentRoom });
     }, 1500);
   });
 
-  socket.on('typing_update', (typers) => {
-    const filtered = typers.filter(t => t !== state.user?.username);
-    if (filtered.length > 0) {
-      typingBar.textContent = `⚡ ${filtered.join(', ')} ${filtered.length === 1 ? 'is' : 'are'} typing...`;
-    } else {
-      typingBar.textContent = '';
+  socket.on('typing_update', ({ typer, isDirect, email }) => {
+    if (isDirect && email === state.activeDmEmail) {
+      typingBar.textContent = `⚡ ${typer} is typing...`;
+    } else if (!isDirect && !state.activeDmEmail) {
+      typingBar.textContent = `⚡ ${typer} is typing...`;
     }
+  });
+
+  socket.on('typing_stop_update', () => {
+    typingBar.textContent = '';
   });
 
   socket.on('users_update', (users) => renderUsers(users));
@@ -375,6 +494,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function escapeHtml(str) {
-    return str.replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m]));
+    return str ? str.replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m])) : '';
   }
 });

@@ -3,8 +3,8 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PulseChat — Real-Time Socket.io Workspace</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PulseChat — Verified Real-Time Workspace</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap"
@@ -16,16 +16,21 @@
     <!-- App Container -->
     <div id="app">
 
-        <!-- LOGIN MODAL -->
+        <!-- MOBILE SIDEBAR OVERLAY -->
+        <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+        <!-- LOGIN / EMAIL VERIFICATION MODAL -->
         <div id="login-modal" class="modal-overlay active">
             <div class="modal-card glass-panel">
                 <div class="brand-badge">
-                    <span class="pulse-dot"></span> Socket.IO Realtime
+                    <span class="pulse-dot"></span> Socket.IO &bull; Email Verified
                 </div>
                 <h1 class="modal-title">Welcome to <span class="gradient-text">PulseChat</span></h1>
-                <p class="modal-subtitle">Join high-speed real-time channels, send voice notes, and chat live.</p>
+                <p class="modal-subtitle">Secure real-time workspace. Verify your email to start private 1-on-1 & group
+                    chats.</p>
 
-                <form id="login-form">
+                <!-- STEP 1: ENTER DETAILS -->
+                <form id="login-step-1" class="login-step">
                     <div class="form-group">
                         <label>Choose Avatar</label>
                         <div class="avatar-picker" id="avatar-picker">
@@ -39,9 +44,15 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="username-input">Your Display Name</label>
-                        <input type="text" id="username-input" placeholder="e.g. Alex Rivera" required maxlength="20"
-                            autocomplete="off">
+                        <label for="username-input">Full Name / Display Name</label>
+                        <input type="text" id="username-input" placeholder="e.g. Alex Rivera" required maxlength="25"
+                            autocomplete="name">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="email-input">Email Address</label>
+                        <input type="email" id="email-input" placeholder="e.g. alex@example.com" required
+                            autocomplete="email">
                     </div>
 
                     <div class="form-group">
@@ -54,7 +65,34 @@
                     </div>
 
                     <button type="submit" class="btn btn-primary btn-full">
-                        <span>Launch Workspace</span> ➔
+                        <span>Send Verification Code</span> ➔
+                    </button>
+                </form>
+
+                <!-- STEP 2: EMAIL OTP VERIFICATION -->
+                <form id="login-step-2" class="login-step hidden">
+                    <div class="verification-badge">
+                        <span>📧 Code sent to <strong id="verify-email-display">user@example.com</strong></span>
+                    </div>
+
+                    <div class="demo-code-banner">
+                        <span>🔑 Verification Code: <strong id="demo-code-val">1234</strong></span>
+                    </div>
+
+                    <div class="form-group" style="margin-top: 16px;">
+                        <label for="otp-input">Enter 4-Digit Verification Code</label>
+                        <input type="text" id="otp-input" placeholder="e.g. 1234" maxlength="4" required
+                            style="text-align: center; letter-spacing: 6px; font-size: 20px; font-weight: 700;">
+                    </div>
+
+                    <div id="otp-error" class="otp-error hidden">Invalid code. Please try again.</div>
+
+                    <button type="submit" class="btn btn-primary btn-full">
+                        <span>Verify & Launch Workspace</span> ✔️
+                    </button>
+
+                    <button type="button" id="back-to-step1" class="btn-text" style="margin-top: 12px;">
+                        ← Change Email
                     </button>
                 </form>
             </div>
@@ -70,7 +108,10 @@
                         <span class="brand-logo">⚡</span>
                         <span class="brand-name">PulseChat</span>
                     </div>
-                    <button id="sound-toggle" class="btn-icon" title="Toggle Sound FX">🔔</button>
+                    <div class="header-actions">
+                        <button id="sound-toggle" class="btn-icon" title="Toggle Sound FX">🔔</button>
+                        <button id="close-sidebar-btn" class="btn-icon mobile-only" title="Close Sidebar">✕</button>
+                    </div>
                 </div>
 
                 <!-- USER PROFILE CARD -->
@@ -80,12 +121,15 @@
                         <span id="current-user-status" class="status-dot online"></span>
                     </div>
                     <div class="user-info">
-                        <span id="current-user-name" class="user-name">User</span>
-                        <span class="user-role">Socket Connected</span>
+                        <div class="user-name-wrapper">
+                            <span id="current-user-name" class="user-name">User</span>
+                            <span class="verified-badge" title="Email Verified">✔</span>
+                        </div>
+                        <span id="current-user-email" class="user-email">email@example.com</span>
                     </div>
                 </div>
 
-                <!-- SEARCH CHANNELS -->
+                <!-- SEARCH CHANNELS & USERS -->
                 <div class="search-box">
                     <input type="text" id="channel-search" placeholder="🔍 Search channels or users...">
                 </div>
@@ -93,7 +137,7 @@
                 <!-- NAVIGATION SECTIONS -->
                 <div class="sidebar-nav">
                     <div class="nav-section-title">
-                        <span>PUBLIC CHANNELS</span>
+                        <span>📢 PUBLIC CHANNELS</span>
                         <button id="add-room-btn" class="btn-add-room" title="Create Channel">+</button>
                     </div>
                     <ul id="rooms-list" class="nav-list">
@@ -101,7 +145,7 @@
                     </ul>
 
                     <div class="nav-section-title">
-                        <span>ONLINE USERS (<span id="user-count">0</span>)</span>
+                        <span>💬 DIRECT MESSAGES (<span id="user-count">0</span>)</span>
                     </div>
                     <ul id="users-list" class="nav-list">
                         <!-- Dynamically populated -->
@@ -114,17 +158,17 @@
                 <!-- CHAT HEADER -->
                 <header class="chat-header glass-panel">
                     <div class="header-left">
-                        <button id="sidebar-toggle" class="btn-icon mobile-only">☰</button>
+                        <button id="sidebar-toggle" class="btn-icon mobile-only" title="Open Menu">☰</button>
                         <div class="room-title-box">
                             <span id="header-icon" class="header-icon">#</span>
                             <div>
                                 <h2 id="current-room-title">general</h2>
-                                <span id="room-subtitle" class="room-subtitle">Real-time public channel</span>
+                                <span id="room-subtitle" class="room-subtitle">Public group channel</span>
                             </div>
                         </div>
                     </div>
                     <div class="header-right">
-                        <span class="connection-badge"><span class="pulse-dot active"></span> Live 60 FPS</span>
+                        <span id="chat-type-badge" class="chat-type-badge public-badge">📢 Public Group</span>
                     </div>
                 </header>
 
