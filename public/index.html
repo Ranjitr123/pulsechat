@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PulseChat — Real-Time Socket.io Workspace</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body>
+    <!-- App Container -->
+    <div id="app">
+
+        <!-- LOGIN MODAL -->
+        <div id="login-modal" class="modal-overlay active">
+            <div class="modal-card glass-panel">
+                <div class="brand-badge">
+                    <span class="pulse-dot"></span> Socket.IO Realtime
+                </div>
+                <h1 class="modal-title">Welcome to <span class="gradient-text">PulseChat</span></h1>
+                <p class="modal-subtitle">Join high-speed real-time channels, send voice notes, and chat live.</p>
+
+                <form id="login-form">
+                    <div class="form-group">
+                        <label>Choose Avatar</label>
+                        <div class="avatar-picker" id="avatar-picker">
+                            <span class="avatar-opt selected" data-avatar="⚡">⚡</span>
+                            <span class="avatar-opt" data-avatar="🚀">🚀</span>
+                            <span class="avatar-opt" data-avatar="👾">👾</span>
+                            <span class="avatar-opt" data-avatar="🦊">🦊</span>
+                            <span class="avatar-opt" data-avatar="🔮">🔮</span>
+                            <span class="avatar-opt" data-avatar="💎">💎</span>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="username-input">Your Display Name</label>
+                        <input type="text" id="username-input" placeholder="e.g. Alex Rivera" required maxlength="20"
+                            autocomplete="off">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Status</label>
+                        <select id="status-select" class="custom-select">
+                            <option value="online">🟢 Online</option>
+                            <option value="away">🟡 Away</option>
+                            <option value="dnd">🔴 Do Not Disturb</option>
+                        </select>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-full">
+                        <span>Launch Workspace</span> ➔
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- MAIN CHAT INTERFACE -->
+        <div id="main-layout" class="main-layout hidden">
+
+            <!-- SIDEBAR -->
+            <aside id="sidebar" class="sidebar glass-panel">
+                <div class="sidebar-header">
+                    <div class="app-brand">
+                        <span class="brand-logo">⚡</span>
+                        <span class="brand-name">PulseChat</span>
+                    </div>
+                    <button id="sound-toggle" class="btn-icon" title="Toggle Sound FX">🔔</button>
+                </div>
+
+                <!-- USER PROFILE CARD -->
+                <div class="user-card glass-card">
+                    <div class="avatar-box">
+                        <span id="current-user-avatar">⚡</span>
+                        <span id="current-user-status" class="status-dot online"></span>
+                    </div>
+                    <div class="user-info">
+                        <span id="current-user-name" class="user-name">User</span>
+                        <span class="user-role">Socket Connected</span>
+                    </div>
+                </div>
+
+                <!-- SEARCH CHANNELS -->
+                <div class="search-box">
+                    <input type="text" id="channel-search" placeholder="🔍 Search channels or users...">
+                </div>
+
+                <!-- NAVIGATION SECTIONS -->
+                <div class="sidebar-nav">
+                    <div class="nav-section-title">
+                        <span>PUBLIC CHANNELS</span>
+                        <button id="add-room-btn" class="btn-add-room" title="Create Channel">+</button>
+                    </div>
+                    <ul id="rooms-list" class="nav-list">
+                        <!-- Dynamically populated -->
+                    </ul>
+
+                    <div class="nav-section-title">
+                        <span>ONLINE USERS (<span id="user-count">0</span>)</span>
+                    </div>
+                    <ul id="users-list" class="nav-list">
+                        <!-- Dynamically populated -->
+                    </ul>
+                </div>
+            </aside>
+
+            <!-- CHAT VIEW CONTAINER -->
+            <main class="chat-viewport">
+                <!-- CHAT HEADER -->
+                <header class="chat-header glass-panel">
+                    <div class="header-left">
+                        <button id="sidebar-toggle" class="btn-icon mobile-only">☰</button>
+                        <div class="room-title-box">
+                            <span id="header-icon" class="header-icon">#</span>
+                            <div>
+                                <h2 id="current-room-title">general</h2>
+                                <span id="room-subtitle" class="room-subtitle">Real-time public channel</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="header-right">
+                        <span class="connection-badge"><span class="pulse-dot active"></span> Live 60 FPS</span>
+                    </div>
+                </header>
+
+                <!-- MESSAGES FEED CONTAINER -->
+                <div id="messages-container" class="messages-container">
+                    <div id="messages-feed" class="messages-feed">
+                        <!-- Messages inserted here via socket events -->
+                    </div>
+                </div>
+
+                <!-- TYPING INDICATOR -->
+                <div id="typing-bar" class="typing-bar">
+                    <!-- Live typing notification text -->
+                </div>
+
+                <!-- ATTACHMENT PREVIEW DRAWER -->
+                <div id="attachment-preview" class="attachment-preview hidden">
+                    <span id="preview-text">Attachment ready</span>
+                    <button id="remove-attachment" class="btn-close">&times;</button>
+                </div>
+
+                <!-- CHAT INPUT BAR -->
+                <footer class="chat-footer glass-panel">
+                    <form id="chat-form" class="chat-form">
+                        <div class="input-actions-left">
+                            <label for="image-input" class="btn-icon" title="Attach Image">📷</label>
+                            <input type="file" id="image-input" accept="image/*" class="hidden">
+                            <button type="button" id="voice-record-btn" class="btn-icon"
+                                title="Hold/Click to Record Voice Note">🎙️</button>
+                        </div>
+
+                        <input type="text" id="message-input" placeholder="Message #general... (Press Enter to send)"
+                            autocomplete="off">
+
+                        <div class="input-actions-right">
+                            <button type="button" id="emoji-picker-btn" class="btn-icon"
+                                title="Insert Emoji">😊</button>
+                            <button type="submit" class="btn btn-send">
+                                <span>Send</span> 🚀
+                            </button>
+                        </div>
+                    </form>
+
+                    <!-- EMOJI PICKER POPOVER -->
+                    <div id="emoji-popover" class="emoji-popover glass-card hidden">
+                        <span class="emoji-opt">👍</span>
+                        <span class="emoji-opt">❤️</span>
+                        <span class="emoji-opt">😂</span>
+                        <span class="emoji-opt">🔥</span>
+                        <span class="emoji-opt">🎉</span>
+                        <span class="emoji-opt">🙌</span>
+                        <span class="emoji-opt">✨</span>
+                        <span class="emoji-opt">💯</span>
+                    </div>
+                </footer>
+            </main>
+
+        </div>
+    </div>
+
+    <!-- SOCKET.IO CLIENT SCRIPT -->
+    <script src="/socket.io/socket.io.js"></script>
+    <!-- APP SCRIPT -->
+    <script src="js/app.js"></script>
+</body>
+
+</html>
