@@ -1,8 +1,12 @@
+
+require('dotenv').config(); // Load environment variables from .env file
+
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const nodemailer = require('nodemailer');
 
 const app = express();
 app.use(cors());
@@ -14,18 +18,28 @@ const io = new Server(server, {
     origin: '*',
     methods: ['GET', 'POST']
   },
-  maxHttpBufferSize: 1e7 // 10MB payload support for base64 images & audio notes
+  maxHttpBufferSize: 1e7
+});
+
+// Nodemailer SMTP Transporter (Uses Gmail / Free SMTP)
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER || '',
+    pass: process.env.EMAIL_PASS || ''
+  }
 });
 
 // In-Memory Data Store
-const users = {}; // socketId -> { id, username, email, verified, avatar, status, currentRoom }
+const users = {}; 
+const pendingOtps = {};
 const roomHistory = {
   general: [],
   'tech-lounge': [],
   'design-hub': [],
   random: []
 };
-const directMessages = {}; // DM key "email1::email2" -> array of messages
+const directMessages = {};
 const customRooms = new Set(['general', 'tech-lounge', 'design-hub', 'random']);
 
 function getDmKey(email1, email2) {
@@ -35,7 +49,45 @@ function getDmKey(email1, email2) {
 io.on('connection', (socket) => {
   console.log(`🔌 New client connected: ${socket.id}`);
 
-  // 1. User Join App with Email Verification
+  // 1. Send Email Verification OTP
+  socket.on('send_email_otp', async ({ email }, callback) => {
+    const cleanEmail = (email || '').toLowerCase().trim();
+    if (!cleanEmail) return callback({ success: false, message: 'Invalid email' });
+
+    const otp = Math.floor(1000 + Math.random() * 9000).toString();
+    pendingOtps[cleanEmail] = otp;
+
+    let emailSent = false;
+
+    // Send Real Email if EMAIL_USER and EMAIL_PASS environment variables are configured
+    if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+      try {
+        await transporter.sendMail({
+          from: `"PulseChat Verification" <${process.env.EMAIL_USER}>`,
+          to: cleanEmail,
+          subject: `${otp} is your PulseChat Verification Code`,
+          html: `
+            <div style="font-family: Arial, sans-serif; padding: 24px; background-color: #0b0f19; color: #ffffff; border-radius: 12px; border: 1px solid #6366f1;">
+              <h2 style="color: #6366f1; margin-top: 0;">⚡ PulseChat Email Verification</h2>
+              <p>Your 4-digit verification code to join the PulseChat workspace is:</p>
+              <h1 style="font-size: 36px; letter-spacing: 6px; color: #06b6d4; background: rgba(255,255,255,0.08); padding: 12px 24px; display: inline-block; border-radius: 8px;">${otp}</h1>
+              <p style="color: #9ca3af; font-size: 13px; margin-top: 24px;">If you did not request this verification code, please ignore this message.</p>
+            </div>
+          `
+        });
+        emailSent = true;
+        console.log(`📧 Real verification email successfully sent to: ${cleanEmail}`);
+      } catch (err) {
+        console.error('❌ Email sending error:', err.message);
+      }
+    } else {
+      console.log(`ℹ️ EMAIL_USER not set. Displaying code [${otp}] in UI fallback.`);
+    }
+
+    callback({ success: true, otp, emailSent });
+  });
+
+  // 2. User Join App
   socket.on('user_join', ({ username, email, avatar, status }) => {
     const cleanEmail = (email || '').toLowerCase().trim();
     
@@ -67,15 +119,13 @@ io.on('connection', (socket) => {
     io.emit('users_update', Object.values(users));
   });
 
-  // 2. Switch Public Channel
+  // 3. Switch Channel
   socket.on('switch_room', (newRoom) => {
     const user = users[socket.id];
     if (!user) return;
 
     const oldRoom = user.currentRoom;
-    if (oldRoom && oldRoom !== newRoom) {
-      socket.leave(oldRoom);
-    }
+    if (oldRoom && oldRoom !== newRoom) socket.leave(oldRoom);
 
     user.currentRoom = newRoom;
     user.activeDmRecipientEmail = null;
@@ -89,7 +139,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  // 3. Open Private Direct Message Session
+  // 4. Open Private DM
   socket.on('open_dm', ({ targetEmail }) => {
     const user = users[socket.id];
     if (!user || !targetEmail) return;
@@ -109,21 +159,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  // 4. Create Custom Channel
-  socket.on('create_room', (roomName) => {
-    const formatted = roomName.toLowerCase().trim().replace(/\s+/g, '-');
-    if (!formatted || customRooms.has(formatted)) return;
-
-    customRooms.add(formatted);
-    roomHistory[formatted] = [];
-
-    io.emit('room_created', {
-      roomName: formatted,
-      rooms: Array.from(customRooms)
-    });
-  });
-
-  // 5. Send Message (Public Room or Private 1-on-1 DM)
+  // 5. Send Message
   socket.on('send_message', (payload) => {
     const sender = users[socket.id];
     if (!sender) return;
@@ -145,72 +181,33 @@ io.on('connection', (socket) => {
     };
 
     if (messageData.isDirect && messageData.recipientEmail) {
-      // Direct Private 1-on-1 Message
       const dmKey = getDmKey(sender.email, messageData.recipientEmail);
       if (!directMessages[dmKey]) directMessages[dmKey] = [];
       directMessages[dmKey].push(messageData);
-      if (directMessages[dmKey].length > 100) directMessages[dmKey].shift();
 
       const targetSockets = Object.values(users).filter(
         u => u.email === sender.email || u.email === messageData.recipientEmail.toLowerCase()
       );
 
       targetSockets.forEach(u => {
-        io.to(u.id).emit('receive_direct_message', {
-          ...messageData,
-          dmKey
-        });
+        io.to(u.id).emit('receive_direct_message', messageData);
       });
     } else {
-      // Public Group Message
       const room = payload.targetRoom || sender.currentRoom;
       if (!roomHistory[room]) roomHistory[room] = [];
       roomHistory[room].push(messageData);
-      if (roomHistory[room].length > 50) roomHistory[room].shift();
 
       io.to(room).emit('receive_message', messageData);
     }
   });
 
-  // 6. Typing Indicators
-  socket.on('typing_start', ({ isDirect, recipientEmail, room }) => {
-    const user = users[socket.id];
-    if (!user) return;
-
-    if (isDirect && recipientEmail) {
-      const targetSockets = Object.values(users).filter(u => u.email === recipientEmail.toLowerCase());
-      targetSockets.forEach(u => {
-        io.to(u.id).emit('typing_update', { typer: user.username, email: user.email, isDirect: true });
-      });
-    } else {
-      const activeRoom = room || user.currentRoom;
-      socket.to(activeRoom).emit('typing_update', { typer: user.username, isDirect: false });
-    }
-  });
-
-  socket.on('typing_stop', ({ isDirect, recipientEmail, room }) => {
-    const user = users[socket.id];
-    if (!user) return;
-
-    if (isDirect && recipientEmail) {
-      const targetSockets = Object.values(users).filter(u => u.email === recipientEmail.toLowerCase());
-      targetSockets.forEach(u => {
-        io.to(u.id).emit('typing_stop_update', { typer: user.username, email: user.email, isDirect: true });
-      });
-    } else {
-      const activeRoom = room || user.currentRoom;
-      socket.to(activeRoom).emit('typing_stop_update', { typer: user.username, isDirect: false });
-    }
-  });
-
-  // 7. User Disconnect
+  // 6. User Disconnect
   socket.on('disconnect', () => {
     const user = users[socket.id];
     if (user) {
       delete users[socket.id];
       io.emit('users_update', Object.values(users));
     }
-    console.log(`❌ Client disconnected: ${socket.id}`);
   });
 });
 

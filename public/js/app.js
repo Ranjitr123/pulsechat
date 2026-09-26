@@ -497,3 +497,36 @@ document.addEventListener('DOMContentLoaded', () => {
     return str ? str.replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m])) : '';
   }
 });
+  // Step 1 Submit: Send Verification Code to Email
+  loginStep1.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const username = usernameInput.value.trim();
+    const email = emailInput.value.trim().toLowerCase();
+
+    if (!username || !email) return;
+
+    const submitBtn = loginStep1.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span>Sending Email...</span> ⏳';
+
+    socket.emit('send_email_otp', { email }, (res) => {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<span>Send Verification Code</span> ➔';
+
+      if (res && res.success) {
+        generatedOtp = res.otp;
+        verifyEmailDisplay.textContent = email;
+
+        const demoBanner = document.querySelector('.demo-code-banner');
+        if (res.emailSent) {
+          demoBanner.innerHTML = `<span>📥 <strong>Verification email sent to ${email}!</strong> Check your inbox.</span>`;
+        } else {
+          demoBanner.innerHTML = `<span>🔑 Code: <strong id="demo-code-val">${res.otp}</strong> (Configure EMAIL_USER for inbox delivery)</span>`;
+        }
+
+        loginStep1.classList.add('hidden');
+        loginStep2.classList.remove('hidden');
+        otpInput.focus();
+      }
+    });
+  });
